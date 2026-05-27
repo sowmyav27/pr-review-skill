@@ -12,9 +12,9 @@ or absence-claims ("no test for X") that were never actually checked. This skill
 structured to kill those failure modes:
 
 - **Two fresh-context subagents.** One finds functional gaps and self-classifies each as
-  CONFIRMED or dismissed (already-mitigated / false-positive / implicitly-covered). A
-  second, with no memory of the first, fact-checks every surviving finding against the
-  real diff: VERIFIED / RETRACT / DOWNGRADE / UNVERIFIABLE.
+  CONFIRMED, dismissed (already-mitigated / false-positive / implicitly-covered), or a
+  question for the author. A second, with no memory of the first, fact-checks every
+  surviving finding against the real diff: VERIFIED / RETRACT / DOWNGRADE / UNVERIFIABLE.
 - **Evidence ledger.** Rules that can only be verified by a search (grep for callers,
   count claims against the diff, read a sibling file) must paste the search output into a
   ledger first. A search-class rule with no ledger entry is reported as **NOT RUN**, never
@@ -22,6 +22,11 @@ structured to kill those failure modes:
 - **Negative verification.** The auditor re-runs the search-class checks the review marked
   PASS and adds a **MISSED** finding if it turns up something the review skipped. This
   catches the most dangerous case: a real gap silently passed over.
+- **Questions, not guesses.** When something can't be settled from the repo (is this the
+  documented flow? why does this step exist?), it becomes a surfaced **Question** for the
+  author instead of a fabricated finding or a silent drop. The auditor re-checks each one
+  and converts any it can actually answer into a finding — so a question can't be used to
+  dodge verification.
 - **Coverage against stated requirements.** A coverage table is built from a plan, ticket,
   or the PR body, with an explicit P0 verdict — review is tied to acceptance criteria, not
   vibes.
@@ -30,7 +35,7 @@ structured to kill those failure modes:
 
 ```
 clarify → fetch diff → detect type → lint → whitespace filter
-       → evidence ledger (search pass) → Q1-Q30 quality rules
+       → evidence ledger (search pass) → Q1-Q33 quality rules
        → coverage table → gap-analysis subagent → compile
        → claim-auditor subagent → print review → (optional) post to GitHub
 ```
@@ -49,7 +54,7 @@ disk or posted to GitHub unless you explicitly ask.
 
 ```
 SKILL.md                        # the orchestration engine (13 steps + guardrails)
-references/checklist-q.md       # Q1-Q30 general quality rules
+references/checklist-q.md       # Q1-Q33 general quality rules
 references/subagent-prompts.md  # gap-analysis + claim-auditor instructions
 references/github-posting.md    # gh API templates for inline comments (opt-in)
 ```
@@ -66,13 +71,15 @@ Optionally pass a ticket URL, a test-plan path, or an old-code path for parity c
 
 ## The rule set
 
-Q1-Q30 are language-agnostic engineering rules (examples shown in Go). A few highlights:
+Q1-Q33 are language-agnostic engineering rules (examples shown in Go). A few highlights:
 
 - Comments explain WHY not WHAT; soft-TODOs need a tracking link (Q1, Q24, Q28)
 - No abstractions without consumers; no vendored copies of upstream code (Q19, Q2)
 - Pin external versions; guard type assertions; no fixed sleeps in tests (Q21, Q22, Q23)
 - Doc/description must match code and the diff must match the PR body (Q16, Q29, Q30)
 - Skip vs fail discipline; iterate the full variant set; scope discipline (Q4, Q8, Q18)
+- Exercise the real documented product flow; assert the *effect* of every state-change,
+  not just `err == nil`; take inputs explicitly, never silently default them (Q31-Q33)
 
 See `references/checklist-q.md` for the full set with fire-conditions and examples.
 

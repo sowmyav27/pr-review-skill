@@ -3,12 +3,14 @@ name: review-pr
 description: >
   Single-entry PR reviewer that verifies its own findings before showing them to
   you. Asks clarifying questions, detects PR type, runs the project linter, applies
-  Q1-Q30 generic quality rules, builds a coverage table against the stated
+  Q1-Q33 generic quality rules, builds a coverage table against the stated
   requirements, and uses two fresh-context subagents — one to find functional gaps
-  (self-classifying each as confirmed or dismissed) and one to fact-check every
-  finding (and re-run search-based checks to catch what the review missed). Prints
-  the review in chat — verdict, check rollup, and per-concern blocks with both
-  current-code and fix-code snippets. Never posts to GitHub unless you ask.
+  (self-classifying each as confirmed, dismissed, or a question for the author) and
+  one to fact-check every finding (and re-run search-based checks to catch what the
+  review missed). Surfaces anything it cannot verify from the repo as a Question
+  rather than a guess. Prints the review in chat — verdict, check rollup, and
+  per-concern blocks with both current-code and fix-code snippets. Never posts to
+  GitHub unless you ask.
 ---
 
 You are reviewing a GitHub pull request. Follow every step below exactly, in order.
@@ -156,7 +158,8 @@ grep, a count, or reading another file cannot be marked PASS on inspection — i
 must cite a ledger entry built here.
 
 **SEARCH-class rules** (verified by an active search, not by reading the changed
-line): **Q2, Q3, Q5, Q7, Q8, Q10, Q11, Q15, Q16, Q17, Q18, Q19, Q27, Q29, Q30.**
+line): **Q2, Q3, Q5, Q7, Q8, Q10, Q11, Q15, Q16, Q17, Q18, Q19, Q27, Q29, Q30,
+Q31, Q32, Q33.**
 
 Run the searches below over the checked-out PR branch (the same working copy Step 4
 lints; if there is no local checkout, read files via
@@ -176,6 +179,17 @@ output into the ledger.
   across CI config and source to confirm whether both compute it.
 - **Q3, Q10** (sibling naming / duplication): grep the added identifiers and blocks
   to enumerate the siblings being compared.
+- **Q31** (test hand-rolls an operation the product exposes): for each install /
+  connect / upgrade the test performs by hand, grep the product's CLI / packages
+  for a supported entry point (`git grep -n '<verb>' -- '<cmd/pkg globs>'`). Record
+  entry point found/not-found and whether the test bypasses it. If unresolved from
+  the repo, emit a Question (Tier 3) rather than a finding.
+- **Q32** (effect assertion per operation): for each created resource or
+  state-change in the diff, locate the following assertion that binds to its effect.
+  Record operation → effect assertion, or "none".
+- **Q33** (input source): for each required input read in the diff, search for a
+  computation or `== ""` fallback that produces it. Record input → source
+  (explicit env / derived / fallback).
 
 For SEARCH-class rules that are judgment, not a command (Q5, Q7, Q8, Q15, Q18, Q27),
 the ledger entry is the explicit enumeration you performed (files compared, call
@@ -194,20 +208,20 @@ Q17  sibling file <path> read=yes; literal <x> source value: <y>; match: <yes|no
 **Contract:** in Step 7 a SEARCH-class rule may be marked PASS or FAIL only if it
 has a ledger entry above. A SEARCH-class rule with no ledger entry is reported as
 NOT RUN, never PASS. Annotate the summary line, e.g.
-`Q1-Q30: FAIL on Q19 · NOT RUN: Q27 (no search evidence) · 22 PASS`.
+`Q1-Q33: FAIL on Q19 · NOT RUN: Q27 (no search evidence) · 25 PASS`.
 
 ------------------------------------------------------------
 STEP 7 — Q-RULES: GENERAL QUALITY (ALL PR TYPES)
 ------------------------------------------------------------
 
-Read `references/checklist-q.md`. Apply each rule Q1 through Q30 to added or
+Read `references/checklist-q.md`. Apply each rule Q1 through Q33 to added or
 changed lines only (after the whitespace filter from Step 5).
 
 Report format — one summary line only:
 ```
-Q1-Q30: FAIL on Q4, Q11 — 28 PASS, 0 N/A
+Q1-Q33: FAIL on Q4, Q11 — 31 PASS, 0 N/A
 ```
-If no rules fail: `Q1-Q30: all PASS`
+If no rules fail: `Q1-Q33: all PASS`
 
 Do NOT emit a per-rule PASS or N/A line. Full detail for each FAIL rule goes only
 in the concerns section.
@@ -269,10 +283,16 @@ instructions verbatim, along with:
 - The PR type from Step 3
 
 The subagent finds candidate gaps AND self-classifies each as:
-CONFIRMED / ALREADY-MITIGATED / FALSE-POSITIVE / IMPLICITLY-COVERED.
+CONFIRMED / ALREADY-MITIGATED / FALSE-POSITIVE / IMPLICITLY-COVERED /
+NEEDS-AUTHOR-INPUT.
 
-Use only CONFIRMED gaps in the final report. Record the dropped-gap count and
-reasons under "Subagent verification summary".
+Use only CONFIRMED gaps as concerns in the final report. Items classified
+NEEDS-AUTHOR-INPUT become **Questions** (see Step 10 "Questions for the author"),
+not concerns — their correctness depends on facts not in the diff/repo (author
+intent, whether a mechanism is the supported/documented one) and the subagent
+confirmed they are not answerable by grep/file-read. Q31 Tier-3 fallbacks land
+here too. Record the dropped-gap count and reasons under "Subagent verification
+summary".
 
 ------------------------------------------------------------
 STEP 10 — COMPILE THE REPORT
@@ -336,13 +356,13 @@ Branch: <headRefName> → <baseRefName>
 <bullets summarising the user's Step 1 answers>
 
 ### Checks run
-<bulleted list: Lint / Q1-Q30 / Coverage / Subagent / Claim audit>
+<bulleted list: Lint / Q1-Q33 / Coverage / Subagent / Claim audit>
 
 ### Lint
 <PASS or FAIL with details>
 
-### Q-rules (Q1-Q30)
-<summary line, e.g. "FAIL on Q4, Q11 — 28 PASS" or "all PASS">
+### Q-rules (Q1-Q33)
+<summary line, e.g. "FAIL on Q4, Q11 — 31 PASS" or "all PASS">
 
 ### Coverage assessment
 Scope source: <plan / ticket / PR description>
@@ -361,6 +381,21 @@ P0 verdict: <covered / NOT covered>
 ### Concerns (BLOCKING first, then by score descending)
 
 <per-concern format for each item>
+
+---
+
+### Questions for the author  (if any)
+
+For each item the gap subagent classified NEEDS-AUTHOR-INPUT (and any Q31 Tier-3
+fallback):
+
+```
+- <File>:<line> — <the specific question>
+  (flips to a finding if: <what answer would reveal a defect / what clears it>)
+```
+
+Questions do NOT change the verdict — they are surfaced and counted only. Add a
+"Resolve open questions before merge" note when any exist.
 
 ---
 
@@ -396,7 +431,7 @@ instructions verbatim, along with:
 - The Step 6 Evidence Ledger and the SEARCH-class rule list (so the auditor can
   re-run the searches and verify the negatives, not just the findings)
 
-The auditor returns **two** results:
+The auditor returns **three** results:
 
 A. For each existing finding, one of:
    - **VERIFIED** — the cited code exists at the cited location and the claim is accurate
@@ -411,15 +446,24 @@ B. A separate negative-verification pass: for each SEARCH-class rule the review
    marked PASS, re-run the search. If the re-run finds a real issue the review
    missed, emit a new **MISSED** finding with quoted evidence.
 
+C. A question-audit pass: for each item in "Questions for the author", the auditor
+   tries to answer it from the diff/repo. Each is then:
+   - **ANSWERABLE** — the diff or a grep answers it; the question was lazy. If the
+     answer reveals a defect, convert it to a finding (MISSED); otherwise drop it.
+   - **GENUINELY-OPEN** — confirmed not resolvable from available sources; keep it.
+
 **After receiving results:**
 - RETRACT → remove the finding; note it under "Audit retractions".
 - DOWNGRADE → adjust severity; note the change.
 - UNVERIFIABLE → add a "(unverifiable locally)" caveat to the finding.
 - VERIFIED → no change.
 - MISSED → add as a new CONFIRMED concern; note it under "Audit additions".
+- ANSWERABLE → remove the question (convert to a finding if it revealed a defect);
+  note it under "Audit retractions".
+- GENUINELY-OPEN → keep the question as-is.
 
-Update the compiled report before Step 12. List RETRACT / DOWNGRADE under "Audit
-retractions / downgrades" and MISSED under "Audit additions".
+Update the compiled report before Step 12. List RETRACT / DOWNGRADE / ANSWERABLE
+under "Audit retractions / downgrades" and MISSED under "Audit additions".
 
 ------------------------------------------------------------
 STEP 12 — PRINT REVIEW IN CHAT (no file written)
@@ -431,7 +475,9 @@ the user explicitly asks for one. The chat is the primary deliverable.
 Print, in this order:
 
 1. **One-line verdict line:**
-   `Verdict: <LGTM | LGTM with concerns | Changes needed> — <N> blocking, <M> non-blocking`
+   `Verdict: <LGTM | LGTM with concerns | Changes needed> — <N> blocking, <M> non-blocking, <Q> questions`
+   (omit the questions count when zero). Questions never change the verdict word —
+   a review with only questions and no blocking concerns is still LGTM.
 
 2. **One-line check rollup:**
    `Lint: <PASS|FAIL> · Q: <FAIL on …|all PASS> · Coverage: <P0 covered|P0 NOT covered>`
@@ -458,7 +504,21 @@ Print, in this order:
    ```
    ```
 
-4. Final line: `Nothing posted to GitHub.`
+4. **Questions for the author** (omit the whole section when there are none).
+   One line each:
+
+   ```
+   ### Questions for the author
+   Q1. <path>:<line> — <the specific question>
+   Q2. ...
+   ```
+
+   Questions carry no code blocks and no severity. Only include an item here if its
+   answer would change the verdict AND it cannot be resolved by grep or file-read
+   (Guardrail 17). A leading question whose answer you already know is a finding,
+   not a question.
+
+5. Final line: `Nothing posted to GitHub.`
 
 Rules for this step:
 - Both code blocks are mandatory for code findings. "Current" must quote real code
@@ -470,7 +530,8 @@ Rules for this step:
   body (Step 13) or the on-request file report.
 - For documentation-only findings, omit the code blocks and use a single
   `Suggested edit:` before/after block of the prose.
-- Skip the concerns list only if there are zero concerns.
+- Skip the concerns list if there are zero concerns; skip the Questions section if
+  there are zero questions; the final line always prints.
 - Do not write any review file unless the user explicitly says "save" / "write to
   disk" / "give me the report file". When asked, write the full per-concern report
   (Step 10 format) to `output/pr-review-<ORG>-<REPO>-<PR_NUMBER>.md`.
@@ -499,8 +560,18 @@ File: <path>  Line: <N>
 <text + code>
 ```
 
-Then ask: "Review the <N> comments above. Reply 'post all', 'post <IDs>', or 'skip'
-to decide what gets posted."
+Questions (Step 10) are also eligible to post. List them after the concern
+comments, in the same gate, phrased as questions with no severity label:
+
+```
+--- Question <N> of <total> ---
+File: <path>  Line: <N>
+
+<the specific question>
+```
+
+Then ask: "Review the <N> comments and <Q> questions above. Reply 'post all',
+'post <IDs>', or 'skip' to decide what gets posted."
 
 Wait for the user's reply before calling any GitHub API. When the user approves,
 read `references/github-posting.md` for the `gh api` command template. **Strip the
@@ -515,7 +586,7 @@ GUARDRAILS
    has answered the clarifying questions. The PR description is not a substitute for
    the user's stated focus.
 
-2. **Confirm every check.** For Q1-Q30, report a summary line only. Full detail for
+2. **Confirm every check.** For Q1-Q33, report a summary line only. Full detail for
    FAILs goes in concerns only.
 
 3. **Diff scope only.** Do not flag pre-existing issues in unchanged code unless the
@@ -540,8 +611,9 @@ GUARDRAILS
 
 9. **Gap self-verification is non-negotiable.** The gap-analysis subagent must
    classify every candidate as CONFIRMED / ALREADY-MITIGATED / FALSE-POSITIVE /
-   IMPLICITLY-COVERED by reading the diff directly. Do not include any gap not
-   self-classified as CONFIRMED.
+   IMPLICITLY-COVERED / NEEDS-AUTHOR-INPUT by reading the diff directly. Do not
+   include any gap as a concern that is not self-classified as CONFIRMED;
+   NEEDS-AUTHOR-INPUT items become Questions, not concerns.
 
 10. **Never post to GitHub without explicit user approval.**
 
@@ -564,3 +636,12 @@ GUARDRAILS
 16. **Search-based rules must cite evidence (Step 6 ledger).** A SEARCH-class rule
     with no ledger entry is NOT RUN, not PASS. This is the forcing function that
     operationalises Guardrail 15 — it is not advice.
+
+17. **Questions are for author-held knowledge only.** A Question is admissible only
+    if (a) its answer would change the verdict and (b) it cannot be resolved by grep
+    or file-read. If you can verify it, verify it — do not downgrade a checkable
+    claim into a question to dodge verification. A leading question whose answer you
+    already know ("why validate twice?" = it's redundant) is a finding, not a
+    question. Open questions never flip the verdict; they are surfaced and counted
+    only. The claim auditor (Step 11) re-checks every question: ANSWERABLE ones are
+    converted to findings or dropped.

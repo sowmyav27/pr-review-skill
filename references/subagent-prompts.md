@@ -99,6 +99,22 @@ Pass to the subagent:
 22. Pointless ceremony (Q13) — is any added primitive's distinguishing feature unused
     (parallelism with a single worker, ordering without dependencies, retry without
     async, helper indirection without reuse)?
+
+23. Real product flow (Q31) — does the test hand-roll an operation the product already
+    exposes as a supported command/API (a from-scratch install where an `add`/`connect`
+    command exists, a manual component upgrade instead of the product upgrade path)?
+    Tier 1: grep the product CLI/packages for the entry point. If you cannot confirm
+    whether the mechanism is the supported one from the diff/repo, classify
+    NEEDS-AUTHOR-INPUT and ask for a doc/command reference — do not assert a fix.
+
+24. Effect assertion (Q32) — for every Create / Update / upgrade / delete, is there a
+    following assertion that binds to the effect (resource deployed/Ready and functional,
+    version actually changed, resource actually gone), or only `Expect(err).To(Succeed())`
+    / a Ready-phase proxy?
+
+25. Input source (Q33) — is any required version/image built by computation (`repo + ":"
+    + version`) or produced by an `if x == "" { x = derive() }` fallback for a value the
+    workflow already sets, instead of read from an explicit input and asserted non-empty?
 ```
 
 ### Return format
@@ -111,6 +127,11 @@ Classification criteria:
 - **ALREADY-MITIGATED** — diff handles this; note exactly where
 - **IMPLICITLY-COVERED** — covered by an upstream wait/assertion; note how
 - **FALSE-POSITIVE** — issue does not exist in the diff; note why
+- **NEEDS-AUTHOR-INPUT** — plausibly real, but correctness depends on facts not in the
+  diff/repo (author intent, whether a mechanism is the supported/documented one, why a
+  step exists). You confirmed it is NOT answerable by grep/file-read. Return as a
+  Question, not a gap. Admissible only if the answer would change the verdict; a question
+  you can answer yourself is not one — verify it instead.
 
 Return **only CONFIRMED gaps** in this format:
 
@@ -125,9 +146,20 @@ Suggested fix: <one sentence>
 Verified: <one sentence — what you checked in the diff to confirm this is real>
 ```
 
+Then return any NEEDS-AUTHOR-INPUT items as Questions, in this format:
+
+```
+QUESTION-1
+File: <path>:<line>
+Question: <the specific question>
+Why it matters: <one sentence>
+Verdict-flip: <what answer would turn this into a finding vs clears it>
+Checked: <the grep/read you ran to confirm the diff/repo does not already answer it>
+```
+
 Also return a single summary line at the end:
 ```
-Dropped: N ALREADY-MITIGATED, N FALSE-POSITIVE, N IMPLICITLY-COVERED
+Dropped: N ALREADY-MITIGATED, N FALSE-POSITIVE, N IMPLICITLY-COVERED · Questions: N
 ```
 
 ---
@@ -200,4 +232,19 @@ Return Table B (negatives):
 |---|---|---|---|---|
 | Q19 | PASS | no | newHelperFunc: 0 call sites in changed files | MISSED |
 | Q29 | PASS | yes | body "6 specs" vs diff 6 blocks | VERIFIED |
+
+5. Audit the Questions (the "Questions for the author" section).
+   For each question, attempt to answer it yourself from the diff/repo (grep, file-read,
+   the old version for a rewrite). A question is only valid if it is genuinely
+   author-held knowledge AND its answer would change the verdict.
+   - ANSWERABLE — the diff or a grep answers it; the question was lazy. If the answer
+     reveals a defect, convert it to a finding (verdict MISSED); otherwise drop it.
+   - GENUINELY-OPEN — confirmed not resolvable from available sources; keep it.
+
+Return Table C (questions):
+
+| Q | Question (abbreviated) | Answerable from repo? | Verdict |
+|---|---|---|---|
+| Q1 | is `cluster.Create` the documented connect path? | no | GENUINELY-OPEN |
+| Q2 | why poll twice for readiness? | yes — L213 already waits | ANSWERABLE → finding |
 ```

@@ -483,3 +483,118 @@ inputs:
 above. For each match, follow the input through the changed code and verify the claimed
 behavior is implemented. The rule cuts both ways — description added without code, and
 code removed without updating the description.
+
+---
+
+### Q31 — Tests must exercise the real, documented product flow [WARN; BLOCKING when the mechanism under test is bypassed]
+
+A test proves something only if it drives the system the way real users do. Setup that
+takes a synthetic shortcut (a from-scratch install where the product ships a supported
+`add` / `connect` command, a manual component upgrade instead of the product's own
+upgrade mechanism, an internal API a user never calls) passes while the real flow stays
+untested.
+
+This rule can't prove "documented" on its own; there is no machine-readable catalog of
+supported flows. It is a suspicion-raiser that delegates verification in three tiers:
+
+- **Tier 1 (repo signal, verifiable — the rule's engine):** does the product expose a
+  first-class entry point for the operation the test hand-rolls? grep the CLI / packages
+  for the supported verb (`add`, `connect`, `upgrade`). A matching command the test
+  bypasses is a concrete, checkable finding.
+- **Tier 2 (docs, best-effort):** fetch the project's own docs for the operation and
+  cite the page if found. Weak: step-to-page mapping is unreliable and internal flows
+  are undocumented.
+- **Tier 3 (author):** if Tier 1/2 don't resolve it, emit a Question for the author
+  asking for the command or doc reference. Do NOT assert a fix.
+
+**Fires when:** the test reimplements an operation the product already exposes as a
+supported command/API (Tier 1 grep finds the entry point and the test bypasses it), OR
+performs a heavier/ad-hoc mechanism where a lighter supported one exists.
+
+**Severity:** BLOCKING only when Tier 1 is unambiguous (the entry point exists, the test
+bypasses it, and that bypass is the behaviour under test — e.g. a "tests component
+upgrade" spec that upgrades the component by hand). Otherwise WARN, or a Question. Never
+auto-BLOCKING on docs grounds the rule could not verify.
+
+**SEARCH-class:** verified by the Tier-1 grep, not by inspection. Record the ledger entry
+(entry point searched, found/not-found, bypassed yes/no). With no ledger entry the rule
+is NOT RUN.
+
+**Examples:**
+
+FAIL: spec "component upgrade across release" upgrades the component via a manual helm
+      command in-test; the product CLI exposes the supported upgrade path.
+PASS: same spec drives the product's upgrade mechanism; a comment links the docs page for
+      the supported flow.
+
+---
+
+### Q32 — Assert the effect of every create / state-change, not just absence of error [BLOCKING when no effect assertion exists; WARN when only a weak proxy is checked]
+
+A test that creates a resource or performs an operation and only checks that the call
+returned no error is tautological: it passes whether or not the operation did anything.
+Each create must be followed by an assertion that the resource reached its intended state
+(deployed / Ready / serving). Each state-change (upgrade, scale, delete, config change)
+must assert the change actually took effect (version is now the target, replicas changed,
+resource is gone). A Ready/Running phase alone is a weak proxy: it proves the object
+exists, not that it functions.
+
+**Fires when:** an added Create / Update / upgrade / delete has no following assertion on
+the resulting state, OR the only assertion is `Expect(err).To(Succeed())` or
+`Status.Phase == Ready` for an operation whose point is a specific functional outcome
+(synced object present, version bumped, traffic served, resource absent).
+
+**SEARCH-class:** for each created resource or state-change in the diff, locate the
+following assertion that binds to its effect. Record the pairing (operation → effect
+assertion, or none) in the ledger.
+
+**Examples:**
+
+FAIL: helm upgrade to `upgradeVersion` with no later assertion the running version
+      changed; resource created, never asserted deployed/Ready.
+PASS: after upgrade, `Eventually(... runningVersion == upgradeVersion ...)`; after create,
+      readiness plus one functional check (API reachable / workload serves).
+
+---
+
+### Q33 — Test inputs come from explicit inputs, never re-derived or silently defaulted in code [WARN; BLOCKING when the fallback can diverge from the real input]
+
+Versions, image references, and run parameters must be passed in explicitly (workflow
+input → env var → test reads and asserts it present). A silent fallback
+(`if x == "" { x = derive() }`) is dead on CI (the workflow always sets it) and quietly
+synthesizes a value on any other path, so a misconfigured run goes green instead of
+failing fast. The workflow is the single source of truth; the test must not re-derive a
+fact an input already encodes (parsing a version back out of an image tag, recomputing
+"published vs local", probing a registry). Disambiguate each version axis as a separate
+input; do not fold them into one.
+
+**Fires when:** a changed test builds a required input by computation (`repo + ":" +
+version`), OR contains an `if input == "" { input = <derive> }` fallback for a value the
+workflow already sets, OR re-derives a fact the workflow already decided.
+
+**Severity:** WARN for a fallback that is merely dead on CI; BLOCKING when the synthesized
+value can diverge from the real input (published artifact pin + dev image side-loaded,
+base image computed from a constant that resolves to the post-upgrade version).
+
+**Related:** Q5 (resolve/validate derived config up-front), Q11 (don't split one concern
+across languages), Q4 (Fail, don't Skip, on invalid input).
+
+**SEARCH-class:** for each required input read in the diff, search for a computation or
+`== ""` fallback that produces it. Record input → source (explicit env / derived /
+fallback) in the ledger.
+
+**Examples:**
+
+FAIL:
+```go
+upgradeImage = os.Getenv("UPGRADE_IMAGE")
+if upgradeImage == "" {
+    upgradeImage = repo + ":" + upgradeVersion
+}
+```
+
+PASS:
+```go
+upgradeImage = os.Getenv("UPGRADE_IMAGE")
+Expect(upgradeImage).NotTo(BeEmpty(), "UPGRADE_IMAGE must be set")
+```
