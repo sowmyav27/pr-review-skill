@@ -1,0 +1,18 @@
+# Review reports written on request by the skill
+output/
+pr-review-*.md
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors
+.idea/
+.vscode/
+*.swp
+*~
+
+# Env / secrets
+.env
+.env.*
+*.local
